@@ -1,7 +1,23 @@
 # Configuration for clustering parameters
 import os
-#Load file name
-filename_AllPlayers = 'All Players Report 20241225.csv'
+
+### Files & Directories
+# Output directory and file path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
+MODEL_DIR = os.path.join(PROJECT_ROOT, "models")
+
+#Input file name
+FILE_TRAINING_DATA_filename = "All Players Report 20241225.csv" #Original data set used to train the model
+FILE_TRAINING_DATA = os.path.join(DATA_DIR, FILE_TRAINING_DATA_filename)
+FILE_NEWDATA_filename = 'All Players Report 20250101.csv' #New data sets to put into original classifier
+FILE_NEWDATA = os.path.join(DATA_DIR, FILE_NEWDATA_filename)
+# Output directory and file path
+OUTPUT_FILE_PLAYERS = os.path.join(OUTPUT_DIR, "training_data_with_clusters.csv")
+OUTPUT_FILE_CLUSTER_MEANS = os.path.join(OUTPUT_DIR, "cluster_means_trainingSet.csv")
+MODEL_FILE = os.path.join(MODEL_DIR, "poker_clusterer.pkl")
+
 
 #Minimum hands to worth classifying, min sample size
 MIN_HANDS = 1000
@@ -9,15 +25,16 @@ MIN_HANDS = 1000
 # Number of clusters (k parameter)
 N_CLUSTERS = 7
 
+
 # Dictionary mapping cluster numbers to meaningful names
 CLUSTER_NAMES = {
-    0: 'The Loose Passive Fish',
-    1: 'The Solid Regs',
-    2: 'The Hyper-aggro Maniacs',
-    3: 'The Tight Passive',
-    4: 'The Loose Aggro Fish',
-    5: 'The Moderate Aggressor',
-    6: 'The Big-Betting Fish'
+    0: 'Balanced Semi-Loose Players',
+    1: 'Loose Passive Callers',
+    2: 'Semi-Loose Neutral Players',
+    3: 'Hyper-LAG Maniacs',
+    4: 'Overly Aggressive Semi-Loose Players',
+    5: 'Tight Passive Rocks',
+    6: 'Loose Aggro Fish' #fixed
 }
 
 # If CLUSTER_NAMES size doesn't match N_CLUSTERS, generate generic names
@@ -72,10 +89,3 @@ EXCLUDE_CLUSTERING_FEATURES = [
 RANDOM_STATE = 42  # For reproducibility
 MAX_ITERATIONS = 300
 N_INIT = 10
-
-# Output directory and file path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-# Output directory and file path
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
-OUTPUT_FILE_PLAYERS = os.path.join(OUTPUT_DIR, "clusteredplayers.csv")
-OUTPUT_FILE_CLUSTER_MEANS = os.path.join(OUTPUT_DIR, "player_cluster_means.csv")

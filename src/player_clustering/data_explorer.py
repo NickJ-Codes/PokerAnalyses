@@ -2,10 +2,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
-import seaborn as sns
-from data_clean import get_clean_data
+from clean_and_load_data import get_clean_data
 from cluster_config import (
-    filename_AllPlayers,
+    FILE_TRAINING_DATA,
+    FILE_NEWDATA,
     CLUSTERING_FEATURES,
     EXCLUDE_CLUSTERING_FEATURES,
     N_CLUSTERS
@@ -109,22 +109,21 @@ def analyze_clusters(df, cluster_labels, feature_cols):
     print("\nCluster Centers (mean values):")
     print(cluster_stats)
 
-    # Visualize cluster characteristics
-    plt.figure(figsize=(15, 10))
-    for i, feature in enumerate(feature_cols, 1):
-        plt.subplot(3, 3, i)
-        sns.boxplot(x='Cluster', y=feature, data=df)
-        plt.title(f'{feature} by Cluster')
-        plt.xticks(rotation=45)
-
-    plt.tight_layout()
-    plt.show()
-
     return df
 
 def main():
     # Load and clean data
-    df = get_clean_data(filename_AllPlayers)
+
+    # Hardcoded - select 1 for training file or 2 for new data file
+    selected_file_number = 1
+    if selected_file_number == 1:
+        file_selected = FILE_TRAINING_DATA
+        print("Training file selected")
+    elif selected_file_number == 2:
+        file_selected = FILE_NEWDATA
+        print("New data file selected")
+
+    df = get_clean_data(file_selected)
 
     if df is not None:
         # Perform exploratory analysis
@@ -142,7 +141,6 @@ def main():
 
             # Analyze clusters
             df_with_clusters = analyze_clusters(df, cluster_labels, feature_cols)
-
 
 if __name__ == "__main__":
     main()

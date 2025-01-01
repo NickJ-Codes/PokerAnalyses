@@ -1,231 +1,164 @@
-"""
-Several goals
-
-Goal 1: Identify clusters of players that are most common
-"""
-
-from data_clean import get_clean_data
-from sklearn.cluster import KMeans
-import seaborn as sns
 import os
-import matplotlib.pyplot as plt
+import pickle
+from sklearn.cluster import KMeans
+import pandas as pd
+import numpy as np
+from typing import List, Dict, Optional
+from pathlib import Path
 from cluster_config import (
-    filename_AllPlayers,
     N_CLUSTERS,
     CLUSTERING_FEATURES,
     RANDOM_STATE,
-    MAX_ITERATIONS,
     CLUSTER_NAMES,
-    CLUSTER_COLORS,
-    N_INIT,
-    OUTPUT_DIR,
-    OUTPUT_FILE_PLAYERS,
-    OUTPUT_FILE_CLUSTER_MEANS
+    MODEL_DIR,
+    MODEL_FILE
 )
 
-def analyze_clusters(dfMain):
-    """Print analysis of the clusters"""
-    print("\nCluster Analysis:")
-    print("-" * 50)
-    for cluster_id in range(N_CLUSTERS):
-        cluster_name = CLUSTER_NAMES[cluster_id]
-        cluster_size = (dfMain['cluster'] == cluster_id).sum()
-        # print(f"\nCluster {cluster_id} ({cluster_name}):")
-        print(f"\nCluster {cluster_id}:")
-        print(f"Size: {cluster_size} players ({cluster_size/len(dfMain)*100:.1f}%)")
-        print("Average values:")
-        for feature in CLUSTERING_FEATURES:
-            mean_value = dfMain[dfMain['cluster'] == cluster_id][feature].mean()
-            print(f"- {feature}: {mean_value:.3f}")
+class PokerPlayerClusterer:
+    def __init__(self, n_clusters: int = N_CLUSTERS):
+        """
+        Initialize the clusterer with specified number of clusters.
 
-def create_cluster_visualizations(dfMain, features_for_clustering):
-    """Create multiple tiled visualizations of the clusters with profitability-based coloring"""
+        Args:
+            n_clusters (int): Number of clusters to form
+        """
+        self.kmeans = KMeans(
+            n_clusters=n_clusters,
+            random_state=RANDOM_STATE,
+            n_init='auto'  # Optimization: Use the new default
+        )
+        self.cluster_names: Optional[Dict] = None
+        self.clustering_features: Optional[List] = None
 
-    plt.style.use('seaborn-v0_8-darkgrid')
+    def fit(self,
+            df: pd.DataFrame,
+            clustering_features: List[str] = CLUSTERING_FEATURES,
+            cluster_names: Dict[int, str] = CLUSTER_NAMES) -> 'PokerPlayerClusterer':
+        """
+        Train the clustering model
 
-    # Create color mapping based on BB/100
-    # Define color boundaries for different profitability levels
-    bounds = [-100, -20, -5, 0, 5, 20, 100]
-    colors = ['darkred', 'red', 'orange', 'yellow', 'yellowgreen', 'green', 'darkgreen']
-    norm = plt.Normalize(min(bounds), max(bounds))
+        Args:
+            df: Input dataFrame
+            clustering_features: list of feature columns to use for clustering
+            cluster_names: mapping of cluster number to cluster names
 
-    # region First set of plots, all density plots
-    plt.figure(figsize=(7, 7))
+        Returns:
+            self: The fitted clusterer
+        """
+        if not all(feature in df.columns for feature in clustering_features):
+            raise ValueError(f"Missing features. Required: {clustering_features}")
 
-    # First plot is PFR vs VPIP density
-    plt.subplot(2, 2, 1)
-    sns.kdeplot(data=dfMain, x='vpip', y='pfr',
-                cmap='RdYlGn', fill=True,
-                levels=20)
-    plt.plot([0, 100], [0, 100], 'r--', alpha=0.5)  # diagonal line
-    plt.xlabel('VPIP')
-    plt.ylabel('PFR')
-    plt.title('VPIP vs PFR (Player Density)')
+        self.clustering_features = clustering_features
+        self.cluster_names = cluster_names
 
-    # Second plot is PFR vs 3bet density
-    plt.subplot(2, 2, 2)
-    sns.kdeplot(data=dfMain, x='pfr', y='3bet_f',
-                cmap='RdYlGn', fill=True,
-                levels=20)
-    plt.xlabel('PFR')
-    plt.ylabel('3bet Frequency')
-    plt.title('PFR vs 3bet (Player Density)')
+        # Extract features for clustering - using numpy array for better performance
+        X = df[clustering_features].to_numpy()
 
-    # Third plot is WTSD vs WSD density
-    plt.subplot(2, 2, 3)
-    sns.kdeplot(data=dfMain, x='wtsd', y='wsd',
-                cmap='RdYlGn', fill=True,
-                levels=20)
-    plt.xlabel('Went to Showdown')
-    plt.ylabel('Won at Showdown')
-    plt.title('WTSD vs WSD (Player Density)')
+        # Fit the model
+        self.kmeans.fit(X)
+        return self
 
-    plt.tight_layout()
-    plt.show()
-    # endregion
+    def predict(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Predict Clusters for New Data
 
-    # region Second set of plots
-    # Create distribution plots for key metrics
-    plt.figure(figsize=(7, 7))
+        Args:
+            df: Input dataFrame
 
-    # by cluster, BB/100 distribution
-    plt.subplot(2, 2, 1)
-    for cluster in sorted(dfMain['cluster'].unique()):
-        cluster_data = dfMain[dfMain['cluster'] == cluster]
-        sns.kdeplot(data=cluster_data['bb_100'],
-                    label = CLUSTER_NAMES[cluster],
-                    color=CLUSTER_COLORS[cluster],
-                    fill=True,
-                    alpha=0.3)
+        Returns:
+            DataFrame with cluster labels
+        """
+        if not all(feature in df.columns for feature in self.clustering_features):
+            raise ValueError(f"Missing features. Required: {self.clustering_features}")
 
-    plt.title('BB/100 Distribution by Cluster')
-    plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
-    plt.legend()
+        # Extract features and predict - using numpy array for better performance
+        X = df[self.clustering_features].to_numpy()
 
-    # by cluster, VPIP distribution
-    plt.subplot(2, 2, 2)
-    for cluster in sorted(dfMain['cluster'].unique()):
-        cluster_data = dfMain[dfMain['cluster'] == cluster]
-        sns.kdeplot(data=cluster_data['vpip'],
-                    label = CLUSTER_NAMES[cluster],
-                    color=CLUSTER_COLORS[cluster],
-                    fill=True,
-                    alpha=0.3)
+        # Modify DataFrame inplace for better memory efficiency
+        df = df.copy()
+        df['cluster'] = self.kmeans.predict(X)
+        df['cluster_name'] = df['cluster'].map(self.cluster_names)
+        return df
 
-    plt.title('VPIP Distribution by Cluster')
-    plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+    def get_cluster_means(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate cluster means for provided dataframe
 
-    # by cluster, PFR distribution
-    plt.subplot(2, 2, 3)
-    for cluster in sorted(dfMain['cluster'].unique()):
-        cluster_data = dfMain[dfMain['cluster'] == cluster]
-        sns.kdeplot(data=cluster_data['pfr'],
-                    label = CLUSTER_NAMES[cluster],
-                    color=CLUSTER_COLORS[cluster],
-                    fill=True,
-                    alpha=0.3)
+        Args:
+            df: Dataframe with cluster assignments
+        Returns:
+            Cluster means with counts
+        """
+        # More efficient aggregation using a list of columns
+        agg_dict = {feature: 'mean' for feature in self.clustering_features}
+        agg_dict['cluster'] = 'count'
 
-    plt.title('PFR Distribution by Cluster')
-    plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        cluster_means = (df.groupby(['cluster', 'cluster_name'])
+                         .agg(agg_dict)
+                         .round(3)
+                         .rename(columns={'cluster': "player_count"})
+                         .reset_index())
+        return cluster_means
 
-    # by cluster, 3B distribution
-    plt.subplot(2, 2, 4)
-    for cluster in sorted(dfMain['cluster'].unique()):
-        cluster_data = dfMain[dfMain['cluster'] == cluster]
-        sns.kdeplot(data=cluster_data['3bet_f'],
-                    label = CLUSTER_NAMES[cluster],
-                    color=CLUSTER_COLORS[cluster],
-                    fill=True,
-                    alpha=0.3)
+    def save_model(self, filepath: str) -> None:
+        """
+        Save the trained model to a pickle file
 
-    plt.title('3Bet Distribution by Cluster')
-    plt.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        Args:
+            filepath: Path to save the model
+        """
+        filepath = MODEL_FILE
+        with open(filepath, 'wb') as f:
+            pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    @classmethod
+    def load_model(cls, filepath: str) -> 'PokerPlayerClusterer':
+        """
+        Load the trained model from a pickle file
 
+        Args:
+            filepath: Path to the saved model
+        Returns:
+            Loaded PokerPlayerClusterer instance
+        """
+        filepath = MODEL_FILE
+        if not Path(filepath).exists():
+            raise FileNotFoundError(f"Model file not found: {filepath}")
 
-    plt.tight_layout()
-    plt.show()
-    # endregion
-
-    # region Third 3d scatterplot of PFR vs VPIP vs BB100
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='3d')
-
-    for cluster in sorted(dfMain['cluster'].unique()):
-        cluster_data = dfMain[dfMain['cluster'] == cluster]
-        ax.scatter(cluster_data['vpip'],
-                   cluster_data['pfr'],
-                   cluster_data['bb_100'],
-                   c=CLUSTER_COLORS[cluster],
-                   label=CLUSTER_NAMES[cluster],
-                   alpha=0.6)
-
-    ax.set_xlabel('VPIP')
-    ax.set_ylabel('PFR')
-    ax.set_zlabel('BB/100')
-    plt.title('3D Cluster Visualization')
-    plt.legend()
-    plt.show()
-    # endregion
+        with open(filepath, 'rb') as f:
+            return pickle.load(f)
 
 def main():
-    # Read your data
-    dfMain = get_clean_data(filename_AllPlayers)  # adjust path as needed
+    # Create sample data more efficiently
+    np.random.seed(42)
+    n_samples = 100
+    sample_data = {
+        feature: np.random.uniform(0, 1, n_samples)
+        for feature in ['aggression', 'bluff_frequency', 'fold_rate', 'raise_frequency']
+    }
+    df = pd.DataFrame(sample_data)
 
-    # Remove rows with missing values
-    dfMain = dfMain.dropna()
-
-    # Verify all features exist in the dataset
-    missing_features = [col for col in CLUSTERING_FEATURES if col not in dfMain.columns]
-    if missing_features:
-        raise ValueError(f"Missing features in dataset: {missing_features}")
-
-    # Extract features for clustering
-    X = dfMain[CLUSTERING_FEATURES]
-
-    # Initialize and fit KMeans
-    kmeans = KMeans(
-        n_clusters=N_CLUSTERS,
-        random_state=RANDOM_STATE,
-        max_iter=MAX_ITERATIONS,
-        n_init=N_INIT
-    )
-
-    # Fit the model and predict clusters
-    dfMain['cluster'] = kmeans.fit_predict(X)
-    dfMain['cluster_name'] = dfMain['cluster'].map(CLUSTER_NAMES)
-
-    # Create cluster means dataframe with both cluster number, name, and count of players
-    cluster_means = dfMain.groupby(['cluster', 'cluster_name']).agg({
-        **{feature: 'mean' for feature in CLUSTERING_FEATURES},
-        'cluster': 'count'  # This adds the count of players
-    }).round(3)
-
-    # Rename the count column to something more descriptive
-    cluster_means = cluster_means.rename(columns={'cluster': 'player_count'})
-
-    # If you want to reset the index to make cluster and cluster_name regular columns
-    cluster_means = cluster_means.reset_index()
-
-    # Save clustered player data
-    # Create output directory if it doesn't exist
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    # Save the classified dataframe
     try:
-        dfMain.to_csv(OUTPUT_FILE_PLAYERS, index=False)
-        cluster_means.to_csv(OUTPUT_FILE_CLUSTER_MEANS, index=True)
-        print(f"Successfully saved classified data to {OUTPUT_FILE_PLAYERS}")
-    except PermissionError:
-        print("Permission denied. Please ensure:")
-        print("1. The output directory is not read-only")
-        print("2. The output files are not open in another program")
-        print("3. You have write permissions in the output directory")
-    except Exception as e:
-        print(f"Error saving output file(s): {str(e)}")
+        # Create and fit the clusterer
+        clusterer = PokerPlayerClusterer()
+        clusterer.fit(df, clustering_features=list(sample_data.keys()))
 
-    # Analyze and visualize
-    analyze_clusters(dfMain)
-    create_cluster_visualizations(dfMain, CLUSTERING_FEATURES)
+        # Test prediction
+        results = clusterer.predict(df)
+
+        # Get and display cluster means
+        cluster_means = clusterer.get_cluster_means(results)
+        print("\nCluster Means:")
+        print(cluster_means)
+
+        # Test save and load functionality
+        model_path = os.path.join(MODEL_DIR, 'test_model_fakeData.pkl')
+        clusterer.save_model(model_path)
+        loaded_clusterer = PokerPlayerClusterer.load_model(model_path)
+        print("\nModel successfully saved and loaded!")
+
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     main()
