@@ -1,1 +1,4 @@
 /data/*
+!/data/Example Training Data.csv
+!/data/Example New Data.csv
+
